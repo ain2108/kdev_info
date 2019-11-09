@@ -7,6 +7,34 @@
 # http://ncmiller.github.io/2016/05/14/linux-and-qemu.html
 # IMPORTANT: This script assumes that it is run on Ubuntu
 
+CPU_NUM=$(grep -c ^processor /proc/cpuinfo)
+
+download_linux () {
+	if [ -z "$1" ]
+	  then
+	    echo "Need the name for dev directory"
+	    exit 0
+	fi
+	
+	TOP=$1
+	cd $TOP
+	echo $(pwd) 
+	git clone https://github.com/torvalds/linux.git;
+}
+
+build_linux() {
+	if [ -z "$1" ]
+	  then
+	    echo "Need the name for dev directory"
+	    exit 0
+	fi
+	
+	TOP=$1
+	cd $TOP/linux
+	make O=$TOP/build/linux-x86-basic x86_64_defconfig
+	make O=$TOP/build/linux-x86-basic kvmconfig
+	make O=$TOP/build/linux-x86-basic -j$CPU_NUM
+}
 
 init () {
 	if [ -z "$1" ]
@@ -43,13 +71,12 @@ init () {
 
 	# Configure busybox to build  as a static binary.
 	# -> Busybox Setting -> Build options -> Build BusyBox as a static binary (no shared libs)
-	# In the script we just append to the config file directly
-	echo "CONFIG_STATIC=y" >> $TOP/build/busybox-x86/.config || exit 1
+	# Script will need to pass it directly to make
 
 	# Build busybox
 	cd $TOP/build/busybox-x86
-	make -j2
-	make install
+	make CONFIG_STATIC=y -j$CPU_NUM 
+	make CONFIG_STATIC=y install
 
 	# Kernels need a filesystem to run. This is also where it finds init.
 	mkdir -p $TOP/build/initramfs/busybox-x86
@@ -58,39 +85,47 @@ init () {
 	cp -av $TOP/build/busybox-x86/_install/* .
 
 	# We need a init script that the kernel boots into
-	touch init
+	touch init || exit 1
 	echo "#!/bin/sh
-	mount -t proc none /proc\n
-	mount -t sysfs none /sys\n
-	exec /bin/sh" > init
+mount -t proc none /proc
+mount -t sysfs none /sys
+exec /bin/sh" > init || exit 1
 
 	# Need it to be executable
-	chmod +x
+	chmod +x init || exit 1
 
 	# Generate initramfs, not sure how this works yet. Yay!
 	find . -print0 \
 	   | cpio --null -ov --format=newc \
-	   | gzip -9 > $TOP/build/initramfs-busybox-x86.cpio.gz;
+	   | gzip -9 > $TOP/build/initramfs-busybox-x86.cpio.gz || exit 1;
 
 }
 
+
 if [ -z "$1" ]
-  then
-    echo "Need the path to top directory"
-    exit 0
+then
+	echo "Need the path to top directory"
+	echo $"Usage: $0 <path_to_dev_root> {init|download_linux|build_linux}"
+    	exit 0
 fi
 
 if [ -z "$2" ]
-  then
-    echo "Need the command name"
-    exit 0
+then
+    	echo "Need the command name"
+   	 exit 0
 fi
 
 case $2 in
 	init)
 		init $1
 		;;
+	download_linux)
+		download_linux $1
+		;;
+	build_linux)
+		build_linux $1
+		;;
 	*)
-		echo $"Usage: $0 {init|get_linux}"
+		echo $"Usage: $0 <path_to_dev_root> {init|download_linux|build_linux}"
 		exit 1
 esac
