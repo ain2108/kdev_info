@@ -8,6 +8,7 @@ I have abandonded efforts trying to compile the kernel on OSX, its much easier t
 After compiling the kernel on the VM, I am using QEMU inside of the VM to run the fresh kernel.
 After spending considerable amount of time trying to set this up, I decided to write a script so I don't
 need to repeat this feat. 
+
 WARNING: Please note that my understanding of what I am doing is minimal, so use at your own risk.
 
 ```bash
@@ -43,5 +44,7 @@ commands.
 ## Links that helped me
 ### Basic Setup and building
 http://ncmiller.github.io/2016/05/14/linux-and-qemu.html
+
 http://blog.vmsplice.net/2011/02/near-instant-kernel-development-cycle.html
+
 https://mgalgs.github.io/2015/05/16/how-to-build-a-custom-linux-kernel-for-qemu-2015-edition.html
