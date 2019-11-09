@@ -39,3 +39,9 @@ qemu-system-x86_64 \
 If all went great, you should be dropped into the fresh kernel shell. Busybox provides us
 with basic utilities that we are all used to, so you should be able to execute the usual
 commands.
+
+## Links that helped me
+### Basic Setup and building
+http://ncmiller.github.io/2016/05/14/linux-and-qemu.html
+http://blog.vmsplice.net/2011/02/near-instant-kernel-development-cycle.html
+https://mgalgs.github.io/2015/05/16/how-to-build-a-custom-linux-kernel-for-qemu-2015-edition.html
