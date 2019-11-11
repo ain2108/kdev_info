@@ -125,6 +125,11 @@ case $2 in
 	build_linux)
 		build_linux $1
 		;;
+	all)
+		init $1
+		download_linux $1
+		build_linux $1
+		;;
 	*)
 		echo $"Usage: $0 <path_to_dev_root> {init|download_linux|build_linux}"
 		exit 1
