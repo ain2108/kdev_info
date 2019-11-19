@@ -221,10 +221,156 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 We definately need to find out what SYSCALL_DEFINE3 really does in addition to knowing that
 3 stands for the number of arguments. Time to focus on ksys_write().
 
+In `ksys_write()` the fist thing we do is getting our hands on the file, as opposed
+to just having the file descriptor -- we call fdget_pos(fd). Naming of the function
+keeps throwing me off. If we dig into it, very soon we endup with __fget_light(fd, FMODE_PATH).
+FMODE_PATH is supposed to be the same as opening a file with O_PATH, which in turn is
+used to talk about a file without opening it. Kind of makes sense, because __fdget(fd)
+is not trying to open the file, just wants get its hands on it.
 
+### __fget_light()
 
+```c
+/*
+ * Lightweight file lookup - no refcnt increment if fd table isn't shared.
+ *
+ * You can use this instead of fget if you satisfy all of the following
+ * conditions:
+ * 1) You must call fput_light before exiting the syscall and returning control
+ *    to userspace (i.e. you cannot remember the returned struct file * after
+ *    returning to userspace).
+ * 2) You must not call filp_close on the returned struct file * in between
+ *    calls to fget_light and fput_light.
+ * ...
+ */
+static unsigned long __fget_light(unsigned int fd, fmode_t mask)
+{
+	struct files_struct *files = current->files;
+	struct file *file;
 
+	if (atomic_read(&files->count) == 1) {
+		file = __fcheck_files(files, fd);
+		if (!file || unlikely(file->f_mode & mask))
+			return 0;
+		return (unsigned long)file;
+	} else {
+		file = __fget(fd, mask);
+		if (!file)
+			return 0;
+		return FDPUT_FPUT | (unsigned long)file;
+	}
+}
+```
 
+The comment on the source is really useful -- this function allows us to get our
+hands on the file without wasting time incrementing and decrementing ref counts.
+The code gets the list of files pointed to by the task. `atomic_read` is just
+the function to allow reading the atomic type, which files->count is.
+
+`files->count` seems to be tracking sharing of the files struct: get_files_struct()
+and put_files_struct() increments and decrements the counter respectively. Thus,
+if count is indeed 1, the `files` is indeed not being shared as per the comment
+attached to __fcheck_files()
+
+```c
+/*
+ * The caller must ensure that fd table isn't shared or hold rcu or file lock
+ */
+static inline struct file *__fcheck_files(struct files_struct *files, unsigned int fd)
+{
+	struct fdtable *fdt = rcu_dereference_raw(files->fdt);
+
+	if (fd < fdt->max_fds) {
+		fd = array_index_nospec(fd, fdt->max_fds);
+		return rcu_dereference_raw(fdt->fd[fd]);
+	}
+	return NULL;
+}
+```
+
+Still need to learn about rcu, so just ignoring this for now. But we have a little
+check if fd exceeds the max_fds, and if it doesn't, we index and return the `file*`.
+What is interesting is the function of `array_index_nospec()`
+
+### array_index_nospec
+
+Comments be blessed. Here is what the macro expands into.
+```c
+/*
+ * array_index_nospec - sanitize an array index after a bounds check
+ *
+ * For a code sequence like:
+ *
+ *     if (index < size) {
+ *         index = array_index_nospec(index, size);
+ *         val = array[index];
+ *     }
+ *
+ * ...if the CPU speculates past the bounds check then
+ * array_index_nospec() will clamp the index within the range of [0,
+ * size).
+ */
+#define array_index_nospec(index, size)					\
+({									\
+	typeof(index) _i = (index);					\
+	typeof(size) _s = (size);					\
+	unsigned long _mask = array_index_mask_nospec(_i, _s);		\
+									\
+	BUILD_BUG_ON(sizeof(_i) > sizeof(long));			\
+	BUILD_BUG_ON(sizeof(_s) > sizeof(long));			\
+									\
+	(typeof(_i)) (_i & _mask);					\
+})
+```
+
+This code actually is kind of cool -- it deals with Spectre V1. I need to read more,
+but basically due to speculative execution a out of bounds access can occur. 
+The comment explains it more elegantly and even better, here is the link to update:
+https://lwn.net/Articles/746551/
+The way the code seems to be working is performing this check without a branch
+
+```c
+/**
+ * array_index_mask_nospec() - generate a ~0 mask when index < size, 0 otherwise
+ * @index: array element index
+ * @size: number of elements in array
+ *
+ * When @index is out of bounds (@index >= @size), the sign bit will be
+ * set.  Extend the sign bit to all bits and invert, giving a result of
+ * zero for an out of bounds index, or ~0 if within bounds [0, @size).
+ */
+#ifndef array_index_mask_nospec
+static inline unsigned long array_index_mask_nospec(unsigned long index,
+						    unsigned long size)
+{
+	/*
+	 * Always calculate and emit the mask even if the compiler
+	 * thinks the mask is not needed. The compiler does not take
+	 * into account the value of @index under speculation.
+	 */
+	OPTIMIZER_HIDE_VAR(index);
+	return ~(long)(index | (size - 1UL - index)) >> (BITS_PER_LONG - 1);
+}
+```
+
+Notice the OPTIMIZER_HIDE_VAR, as the comment says it hides the variable
+from the optimizer. Pretty sick.
+
+## Discoveries
+### asmlinkage
+Still not entirely sure why `asmlinkage` is actually needed.
+In short, the modifier tells the function to look for its params on the stack
+instead of the registers. Read somewhere that this allows the syscalls to support
+many arguments, but not entirely sure how this makes sense.
+
+### Spectre V1
+Vulnerability that allows out of bounds array access. The branch that verifies
+that index < size is assumed to be true, and then array[index] data is requested.
+The work around is really cool I think that makes the check without using branches.
+
+## TODO:
+1. Learn about RCU
+2. Understand fully how array_index_nospec works.
 
 
 
