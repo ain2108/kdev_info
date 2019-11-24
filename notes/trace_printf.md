@@ -228,7 +228,7 @@ FMODE_PATH is supposed to be the same as opening a file with O_PATH, which in tu
 used to talk about a file without opening it. Kind of makes sense, because __fdget(fd)
 is not trying to open the file, just wants get its hands on it.
 
-### __fget_light()
+#### __fget_light()
 
 ```c
 /*
@@ -292,7 +292,7 @@ Still need to learn about rcu, so just ignoring this for now. But we have a litt
 check if fd exceeds the max_fds, and if it doesn't, we index and return the `file*`.
 What is interesting is the function of `array_index_nospec()`
 
-### array_index_nospec
+#### array_index_nospec
 
 Comments be blessed. Here is what the macro expands into.
 ```c
@@ -353,8 +353,21 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 }
 ```
 
-Notice the OPTIMIZER_HIDE_VAR, as the comment says it hides the variable
-from the optimizer. Pretty sick.
+Notice the OPTIMIZER_HIDE_VAR, as the comment says, it hides the variable
+from the optimizer. Pretty sick. Mask will be zero if index is out of bounds.
+Notice how its implemented without if statements :) On the other hand, the mask
+will be all 1s if the index is less then size. `array_index_nospec()` then 
+`&`s the mask with index, which makes a speculative out of bounds index 0. 
+This avoids speculative memory access outside of the array in question.
+
+Thus `__thus_fcheck_files()` returns the file*. Let's now go back to looking at
+ksys_write(). 
+
+#### vfs_write()
+
+Once we have the `file*`, we can use it to get the file position needed by `vfs_write()`.
+
+
 
 ## Discoveries
 ### asmlinkage
